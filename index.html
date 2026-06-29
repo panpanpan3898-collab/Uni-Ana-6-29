@@ -409,7 +409,7 @@ function pdfSummaryFor(city){
   const kpis=[['Total Key Inactive',keyArr.length],['Out of Delivery',oodArr.length],['195 Linehaul Inac',c195],['7+ Days',seven]];
   if(city==='ALL') kpis.push(['Reference 199',c199],['Reference 255',c255],['Manual Removed',removedManual],['Recovered / Closed',removedRecovered]);
   const routes=topAgg(oodArr,'route',8);
-  const drivers=topAgg(oodArr,r=>r.driverAtInactive||r.currentDriver||r.lastScanDriver,8);
+  const drivers=topAgg(oodArr,r=>r.driverAtInactive||r.currentDriver||r.lastScanDriver,12);
   const line195=linehaulTable(keyArr,195).slice(0,8);
   const status=statusMatrix(oodArr).slice(0,8);
   return {arr,keyArr,oodArr,kpis,routes,drivers,line195,status};
@@ -426,7 +426,6 @@ function buildPdfPage(city){
   html+=pdfBars('Aging distribution', group(s.keyArr,'agingBucket'));
   html+=pdfTable('Top OOD routes',[{label:'Route',key:'key'},{label:'Total',key:'total'},{label:'200',key:'c200'},{label:'202',key:'c202'},{label:'211',key:'c211'},{label:'231',key:'c231'},{label:'7+ Days',key:'seven'}],s.routes);
   html+=pdfTable('Top OOD drivers',[{label:'Driver ID',key:'key'},{label:'Total',key:'total'},{label:'7+ Days',key:'seven'},{label:'Oldest Time',key:'oldest'}],s.drivers);
-  html+=pdfTable('195 Linehaul Inac',[{label:'Inact. WHS → Dest. WHS',key:'key'},{label:'<14d',key:'lt14'},{label:'>14d',key:'gt14'},{label:'Total',key:'total'},{label:'Oldest Time',key:'oldest'}],s.line195);
   html+=pdfTable('Out of Delivery matrix',[{label:'WHS',key:'whs'},{label:'200',key:'c200'},{label:'202',key:'c202'},{label:'211',key:'c211'},{label:'220',key:'c220'},{label:'231',key:'c231'},{label:'232',key:'c232'},{label:'Total',key:'total'}],s.status);
   html+=`</div><div class="pdf-note">Data-only PDF export. Excludes Remove Updated Packages controls, raw package-level data, and dashboard styling.</div></section>`;
   return html;
@@ -548,12 +547,11 @@ function addPdfPageManual(doc, city, pageNo){
   drawPdfBarsAsTable(doc, 'Aging distribution', group(s.keyArr,'agingBucket'), x2, y, colW, rowH);
   y += rowH + 0.12;
   drawPdfTable(doc,'Top OOD routes',[{label:'Route',key:'key'},{label:'Total',key:'total'},{label:'200',key:'c200'},{label:'202',key:'c202'},{label:'211',key:'c211'},{label:'231',key:'c231'},{label:'7+',key:'seven'}],s.routes,x1,y,colW,rowH);
-  drawPdfTable(doc,'Top OOD drivers',[{label:'Driver ID',key:'key'},{label:'Total',key:'total'},{label:'7+',key:'seven'},{label:'Oldest Time',key:'oldest'}],s.drivers,x2,y,colW,rowH);
+  drawPdfTable(doc,'Top OOD drivers',[{label:'Driver ID',key:'key'},{label:'Total',key:'total'},{label:'7+',key:'seven'},{label:'Oldest Time',key:'oldest'}],s.drivers,x2,y,colW,rowH*2+0.12);
   y += rowH + 0.12;
-  drawPdfTable(doc,'195 Linehaul Inac',[{label:'Inact. WHS → Dest. WHS',key:'key'},{label:'<14d',key:'lt14'},{label:'>14d',key:'gt14'},{label:'Total',key:'total'},{label:'Oldest Time',key:'oldest'}],s.line195,x1,y,colW,rowH);
-  drawPdfTable(doc,'Out of Delivery matrix',[{label:'WHS',key:'whs'},{label:'200',key:'c200'},{label:'202',key:'c202'},{label:'211',key:'c211'},{label:'220',key:'c220'},{label:'231',key:'c231'},{label:'232',key:'c232'},{label:'Total',key:'total'}],s.status,x2,y,colW,rowH);
+  drawPdfTable(doc,'Out of Delivery matrix',[{label:'WHS',key:'whs'},{label:'200',key:'c200'},{label:'202',key:'c202'},{label:'211',key:'c211'},{label:'220',key:'c220'},{label:'231',key:'c231'},{label:'232',key:'c232'},{label:'Total',key:'total'}],s.status,x1,y,colW,rowH);
   doc.setFont('helvetica','normal'); doc.setFontSize(6); doc.setTextColor(120,120,120);
-  doc.text('Data-only PDF export. Layout is generated directly in PDF to prevent clipped charts/tables.',0.35,8.08);
+  doc.text('Data-only PDF export. Top OOD drivers are expanded; 195 Linehaul Inac detail block is excluded from PDF.',0.35,8.08);
 }
 async function downloadReportPdf(filename, pageCities){
   const overlay=document.createElement('div'); overlay.className='pdf-working'; overlay.textContent='Generating PDF…'; document.body.appendChild(overlay);
