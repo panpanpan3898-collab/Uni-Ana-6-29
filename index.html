@@ -6,6 +6,7 @@
 <title>ATL Region Inactive Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 :root{
   --bg:#0b0b0f;
@@ -430,37 +431,143 @@ function buildPdfPage(city){
   html+=`</div><div class="pdf-note">Data-only PDF export. Excludes Remove Updated Packages controls, raw package-level data, and dashboard styling.</div></section>`;
   return html;
 }
+
+function trendEntriesForPdf(arr){
+  const m={};
+  arr.forEach(r=>{
+    const d=(r.latestStatusTime||'').slice(0,10);
+    if(d) m[d]=(m[d]||0)+1;
+  });
+  return Object.entries(m).sort().slice(-18).map(([date,count])=>({date,count}));
+}
+function pdfTextSafe(v){ return String(v??''); }
+function pdfFitText(doc, text, maxWidth){
+  text = pdfTextSafe(text);
+  if(doc.getTextWidth(text) <= maxWidth) return text;
+  while(text.length > 3 && doc.getTextWidth(text + '…') > maxWidth) text = text.slice(0,-1);
+  return text + '…';
+}
+function drawPdfHeader(doc, title, sub, pageNo){
+  const W=doc.internal.pageSize.getWidth();
+  doc.setFillColor(255,106,0);
+  doc.rect(0,0,W,0.12,'F');
+  doc.setTextColor(17,17,17);
+  doc.setFont('helvetica','bold'); doc.setFontSize(16);
+  doc.text(title,0.35,0.42);
+  doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(85,85,85);
+  doc.text(pdfFitText(doc, sub, 7.4),0.35,0.62);
+  doc.text(`Generated ${new Date().toLocaleString()}  ·  Page ${pageNo}`, W-0.35,0.42,{align:'right'});
+  doc.setDrawColor(20,20,20); doc.setLineWidth(0.01); doc.line(0.35,0.78,W-0.35,0.78);
+}
+function drawPdfKpis(doc, kpis, y){
+  const W=doc.internal.pageSize.getWidth();
+  const x0=0.35, gap=0.08;
+  const cols=Math.min(8, kpis.length || 1);
+  const boxW=(W-0.7-gap*(cols-1))/cols;
+  kpis.slice(0,8).forEach((k,i)=>{
+    const x=x0+i*(boxW+gap);
+    doc.setDrawColor(205,205,205); doc.setFillColor(250,250,250); doc.roundedRect(x,y,boxW,0.58,0.04,0.04,'FD');
+    doc.setFont('helvetica','bold'); doc.setFontSize(6.2); doc.setTextColor(82,82,82);
+    doc.text(pdfFitText(doc,k[0],boxW-0.12),x+0.06,y+0.18);
+    doc.setFontSize(15); doc.setTextColor(17,17,17);
+    doc.text(fmt(k[1]),x+0.06,y+0.46);
+  });
+  return y+0.72;
+}
+function drawPdfLineChart(doc, title, entries, x, y, w, h, color){
+  doc.setDrawColor(205,205,205); doc.setFillColor(255,255,255); doc.roundedRect(x,y,w,h,0.04,0.04,'FD');
+  doc.setFont('helvetica','bold'); doc.setFontSize(7.2); doc.setTextColor(17,17,17);
+  doc.text(title,x+0.08,y+0.18);
+  const px=x+0.34, py=y+0.32, cw=w-0.48, ch=h-0.58;
+  if(!entries || entries.length < 2){
+    doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(120,120,120);
+    const msg = entries && entries.length===1 ? `${entries[0].date}: ${fmt(entries[0].count)}` : 'Not enough date points for a curve.';
+    doc.text(msg,x+0.08,y+0.55);
+    return;
+  }
+  const max=Math.max(1,...entries.map(e=>e.count));
+  const step=cw/(entries.length-1);
+  doc.setDrawColor(235,235,235); doc.setLineWidth(0.005);
+  [0,0.5,1].forEach(t=>{ const yy=py+ch-(t*ch); doc.line(px,yy,px+cw,yy); });
+  doc.setDrawColor(190,190,190); doc.line(px,py+ch,px+cw,py+ch); doc.line(px,py,px,py+ch);
+  const pts=entries.map((e,i)=>({x:px+i*step, y:py+ch-(e.count/max)*ch, ...e}));
+  doc.setDrawColor(color[0],color[1],color[2]); doc.setLineWidth(0.025);
+  for(let i=1;i<pts.length;i++) doc.line(pts[i-1].x,pts[i-1].y,pts[i].x,pts[i].y);
+  pts.forEach((pt,i)=>{
+    doc.setFillColor(color[0],color[1],color[2]); doc.circle(pt.x,pt.y,0.035,'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(6.2); doc.setTextColor(17,17,17);
+    let ty=Math.max(py+0.08,pt.y-0.07);
+    doc.text(fmt(pt.count),pt.x,ty,{align:'center'});
+    if(i===0 || i===pts.length-1 || i%Math.ceil(pts.length/6)===0){
+      doc.setFont('helvetica','normal'); doc.setFontSize(5.6); doc.setTextColor(95,95,95);
+      doc.text(pt.date.slice(5),pt.x,py+ch+0.16,{align:'center'});
+    }
+  });
+}
+function drawPdfBarsAsTable(doc, title, data, x, y, w, h){
+  const rows=Object.entries(data||{}).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([category,count])=>({category,count}));
+  drawPdfTable(doc,title,[{label:'Category',key:'category'},{label:'Count',key:'count'}],rows,x,y,w,h);
+}
+function drawPdfTable(doc, title, cols, data, x, y, w, h){
+  doc.setDrawColor(205,205,205); doc.setFillColor(255,255,255); doc.roundedRect(x,y,w,h,0.04,0.04,'FD');
+  doc.setFont('helvetica','bold'); doc.setFontSize(7); doc.setTextColor(17,17,17);
+  doc.text(title,x+0.06,y+0.17);
+  const top=y+0.26, rowH=0.18, maxRows=Math.max(1,Math.floor((h-0.33)/rowH)-1);
+  const colW=w/cols.length;
+  doc.setFillColor(239,239,239); doc.rect(x+0.04,top,w-0.08,rowH,'F');
+  doc.setDrawColor(210,210,210); doc.setLineWidth(0.003);
+  doc.setFontSize(5.8); doc.setTextColor(35,35,35);
+  cols.forEach((c,i)=>doc.text(pdfFitText(doc,c.label,colW-0.08),x+0.07+i*colW,top+0.12));
+  (data||[]).slice(0,maxRows).forEach((r,ri)=>{
+    const yy=top+rowH*(ri+1);
+    if(ri%2===0){doc.setFillColor(250,250,250); doc.rect(x+0.04,yy,w-0.08,rowH,'F');}
+    doc.setFont('helvetica','normal'); doc.setFontSize(5.7); doc.setTextColor(45,45,45);
+    cols.forEach((c,i)=>{
+      let val=c.val?c.val(r):(r[c.key]??'');
+      if(typeof val==='number') val=fmt(val);
+      doc.text(pdfFitText(doc,val,colW-0.08),x+0.07+i*colW,yy+0.12);
+    });
+  });
+  if((data||[]).length>maxRows){
+    doc.setFont('helvetica','italic'); doc.setFontSize(5.5); doc.setTextColor(120,120,120);
+    doc.text(`+ ${(data||[]).length-maxRows} more rows in dashboard`,x+w-0.08,y+h-0.07,{align:'right'});
+  }
+}
+function addPdfPageManual(doc, city, pageNo){
+  if(pageNo>1) doc.addPage('letter','landscape');
+  const s=pdfSummaryFor(city);
+  const title=city==='ALL'?'ATL Region Overview':`${city} City Report`;
+  const sub=city==='ALL'?'Total Key Inactive excludes 199 and 255. Reference metrics shown separately.':'City report includes OOD + 195. 199/255, raw data, and removal controls are excluded.';
+  drawPdfHeader(doc,title,sub,pageNo);
+  let y=drawPdfKpis(doc,s.kpis,0.92);
+  drawPdfLineChart(doc,'195 Linehaul Trend', trendEntriesForPdf(s.keyArr.filter(r=>codeNum(r.latestCode)===195)), 0.35, y, 5.05, 1.35, [108,76,255]);
+  drawPdfLineChart(doc,'200+ OOD Trend', trendEntriesForPdf(s.oodArr), 5.60, y, 5.05, 1.35, [255,106,0]);
+  y += 1.50;
+  const colW=5.05, rowH=1.30, x1=0.35, x2=5.60;
+  drawPdfBarsAsTable(doc, city==='ALL'?'Key inactive by warehouse':'Module split', city==='ALL'?group(s.keyArr,'city'):group(s.keyArr,'rootCause'), x1, y, colW, rowH);
+  drawPdfBarsAsTable(doc, 'Aging distribution', group(s.keyArr,'agingBucket'), x2, y, colW, rowH);
+  y += rowH + 0.12;
+  drawPdfTable(doc,'Top OOD routes',[{label:'Route',key:'key'},{label:'Total',key:'total'},{label:'200',key:'c200'},{label:'202',key:'c202'},{label:'211',key:'c211'},{label:'231',key:'c231'},{label:'7+',key:'seven'}],s.routes,x1,y,colW,rowH);
+  drawPdfTable(doc,'Top OOD drivers',[{label:'Driver ID',key:'key'},{label:'Total',key:'total'},{label:'7+',key:'seven'},{label:'Oldest Time',key:'oldest'}],s.drivers,x2,y,colW,rowH);
+  y += rowH + 0.12;
+  drawPdfTable(doc,'195 Linehaul Inac',[{label:'Inact. WHS → Dest. WHS',key:'key'},{label:'<14d',key:'lt14'},{label:'>14d',key:'gt14'},{label:'Total',key:'total'},{label:'Oldest Time',key:'oldest'}],s.line195,x1,y,colW,rowH);
+  drawPdfTable(doc,'Out of Delivery matrix',[{label:'WHS',key:'whs'},{label:'200',key:'c200'},{label:'202',key:'c202'},{label:'211',key:'c211'},{label:'220',key:'c220'},{label:'231',key:'c231'},{label:'232',key:'c232'},{label:'Total',key:'total'}],s.status,x2,y,colW,rowH);
+  doc.setFont('helvetica','normal'); doc.setFontSize(6); doc.setTextColor(120,120,120);
+  doc.text('Data-only PDF export. Layout is generated directly in PDF to prevent clipped charts/tables.',0.35,8.08);
+}
 async function downloadReportPdf(filename, pageCities){
   const overlay=document.createElement('div'); overlay.className='pdf-working'; overlay.textContent='Generating PDF…'; document.body.appendChild(overlay);
-  const wrap=document.createElement('div'); wrap.className='pdf-report'; wrap.innerHTML=pageCities.map(buildPdfPage).join(''); document.body.appendChild(wrap);
   try{
-    if(window.html2pdf){
-      await html2pdf().set({
-        margin:[0.25,0.25,0.25,0.25],
-        filename,
-        image:{type:'jpeg',quality:0.98},
-        html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'},
-        jsPDF:{unit:'in',format:'letter',orientation:'landscape'},
-        pagebreak:{mode:['css','legacy']}
-      }).from(wrap).save();
-      celebrate();
-    }else{
-      const w=window.open('','_blank');
-      w.document.write(`<!doctype html><html><head><title>${escapeHtml(filename)}</title><style>${[...document.styleSheets].map(ss=>{try{return [...ss.cssRules].map(r=>r.cssText).join('\n')}catch(e){return ''}}).join('\n')}
-.side-sep{height:1px;background:rgba(255,255,255,.12);margin:14px 0}
-.history-nav{margin-top:4px}
-.inline-upload{display:inline-flex;margin-top:6px}
-.history-city-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:14px}
-.city-history-card{padding:14px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.06)}
-.city-history-card h4{margin:0 0 10px;color:#fff}
-.mini-chart-title{font-size:12px;color:var(--muted);margin:8px 0 2px}
-</style></head><body>${wrap.outerHTML}</body></html>`);
-      w.document.close(); w.focus(); setTimeout(()=>w.print(),500);
-    }
+    const jsPDFCtor = (window.jspdf && window.jspdf.jsPDF) || (window.jsPDF) || (window.html2pdf && window.html2pdf.jsPDF);
+    if(!jsPDFCtor) throw new Error('jsPDF library is not available. Please check network access and reload the page.');
+    const doc = new jsPDFCtor({unit:'in',format:'letter',orientation:'landscape',compress:true});
+    pageCities.forEach((city,i)=>addPdfPageManual(doc, city, i+1));
+    doc.save(filename);
+    celebrate();
   }catch(err){
     document.getElementById('warnings').innerHTML=`<div class="warn">PDF export failed: ${escapeHtml(err.message||err)}</div>`;
   }finally{
-    wrap.remove(); overlay.remove();
+    overlay.remove();
   }
 }
 function exportCurrentPDF(){
