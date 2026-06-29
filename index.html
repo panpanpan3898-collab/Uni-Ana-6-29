@@ -180,13 +180,35 @@ function excelSerialToDateTime(v){
   const d=new Date(Date.UTC(1899,11,30)+ms);
   return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth()+1)}-${pad2(d.getUTCDate())} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`;
 }
+function isIsoDateTime(s){return /^\d{4}-\d{2}-\d{2}/.test(String(s||''));}
+function isExcelTimeOnlyValue(v){
+  if(v===null || v===undefined || v==='') return false;
+  if(typeof v==='number') return v>0 && v<1;
+  const s=String(v).trim();
+  return /^\.\d+$/.test(s) || /^0?\.\d+$/.test(s);
+}
+function excelTimeFractionToHMS(v){
+  let num=Number(String(v).trim().startsWith('.') ? '0'+String(v).trim() : v);
+  if(!Number.isFinite(num) || num<0 || num>=1) return '00:00:00';
+  const total=Math.round(num*86400);
+  const hh=Math.floor(total/3600)%24, mm=Math.floor((total%3600)/60), ss=total%60;
+  return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
+}
+function dateFromSnapshotMinusHours(snapshotDate, hrs){
+  if(!snapshotDate || !Number.isFinite(Number(hrs))) return '';
+  const base=new Date(`${snapshotDate}T12:00:00Z`);
+  if(isNaN(base)) return '';
+  base.setUTCHours(base.getUTCHours()-Number(hrs));
+  return `${base.getUTCFullYear()}-${pad2(base.getUTCMonth()+1)}-${pad2(base.getUTCDate())}`;
+}
 function normalizeDateTime(v){
   if(v===null || v===undefined || v==='') return '';
   if(v instanceof Date && !isNaN(v)) return `${v.getFullYear()}-${pad2(v.getMonth()+1)}-${pad2(v.getDate())} ${pad2(v.getHours())}:${pad2(v.getMinutes())}:${pad2(v.getSeconds())}`;
-  if(typeof v==='number') return excelSerialToDateTime(v) || String(v);
+  if(typeof v==='number') return excelSerialToDateTime(v) || (isExcelTimeOnlyValue(v) ? excelTimeFractionToHMS(v) : String(v));
   let s=String(v).trim();
   if(!s) return '';
-  if(/^\d+(\.\d+)?$/.test(s)) return excelSerialToDateTime(s) || s;
+  if(/^\d+(\.\d+)?$/.test(s)) return excelSerialToDateTime(s) || (isExcelTimeOnlyValue(s) ? excelTimeFractionToHMS(s) : s);
+  if(/^\.\d+$/.test(s)) return excelTimeFractionToHMS(s);
   s=s.replace(/\//g,'-').replace('T',' ');
   let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
   if(m) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])} ${pad2(m[4]||0)}:${pad2(m[5]||0)}:${pad2(m[6]||0)}`;
@@ -195,6 +217,18 @@ function normalizeDateTime(v){
   const d=new Date(s);
   if(!isNaN(d)) return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
   return s;
+}
+function normalizeStatusTime(rawValue, durationHrs, snapshotDate){
+  const normalized=normalizeDateTime(rawValue);
+  if(isIsoDateTime(normalized)) return normalized;
+  // Some uploaded Excel files store Latest Status Time as a time-only fraction, such as .0596.
+  // In that case, rebuild the date from the report snapshot date minus Duration of Inactivity.
+  const derivedDate=dateFromSnapshotMinusHours(snapshotDate, durationHrs);
+  if(derivedDate){
+    const timePart=isExcelTimeOnlyValue(rawValue) ? excelTimeFractionToHMS(rawValue) : (/^\d{1,2}:\d{2}/.test(normalized) ? normalized : '00:00:00');
+    return `${derivedDate} ${timePart}`;
+  }
+  return normalized;
 }
 function dateKey(v){const s=normalizeDateTime(v); return /^\d{4}-\d{2}-\d{2}/.test(s)?s.slice(0,10):(s||'Unknown')}
 function dateLabel(v){const k=dateKey(v); return /^\d{4}-\d{2}-\d{2}$/.test(k)?k.slice(5):k}
@@ -304,8 +338,8 @@ table(document.getElementById('linehaul195Table'),[{label:'Inact. WHS → Dest. 
 table(document.getElementById('linehaul255Table'),[{label:'Inact. WHS → Dest. WHS',key:'key'},{label:'255 (>5d)',key:'gt5'},{label:'Total 255',key:'total'},{label:'Oldest Time',key:'oldest'}],linehaulTable(arr,255));
 let q=(document.getElementById('rawSearch').value||'').toLowerCase(); let raw=keyArr.filter(r=>!q||JSON.stringify(r).toLowerCase().includes(q)).slice(0,500); table(document.getElementById('rawTable'),[{label:'TNO',key:'tno'},{label:'City',key:'city'},{label:'Latest WHS',key:'latestWHS'},{label:'Route',key:'route'},{label:'Driver',key:'driverAtInactive'},{label:'Current Driver',key:'currentDriver'},{label:'Code',key:'latestCode'},{label:'Module',html:r=>badgeCause(r.rootCause)},{label:'Aging',key:'agingBucket'},{label:'Hrs',key:'durationHrs'},{label:'Latest Time',key:'latestStatusTime'},{label:'Status',key:'inactiveParcelStatus'}],raw)}
 function exportCSV(type){let arr=filtered(); if(type==='195')arr=arr.filter(r=>codeNum(r.latestCode)===195); if(type==='255')arr=arr.filter(r=>codeNum(r.latestCode)===255); if(type==='199')arr=arr.filter(r=>codeNum(r.latestCode)===199); if(type==='ood')arr=arr.filter(r=>OOD_CODES.has(codeNum(r.latestCode))); if(type==='raw')arr=arr.filter(r=>{let c=codeNum(r.latestCode); return c!==199 && c!==255;}); let keys=['tno','orderId','city','latestWHS','route','driverAtInactive','currentDriver','latestCode','rootCause','agingBucket','durationHrs','latestStatusTime','inactiveParcelStatus','recoveryTime','recoveredWithinDeadline']; let csv=[keys.join(',')].concat(arr.map(r=>keys.map(k=>'"'+String(r[k]??'').replaceAll('"','""')+'"').join(','))).join('\n'); let a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download=`inactive_${activeCity}_${type}.csv`; a.click();}
-function normalizeRow(r){let get=(names)=>{for(const n of names){let k=Object.keys(r).find(x=>x.trim().replace(/\u200b/g,'').toLowerCase()===n.toLowerCase()); if(k)return r[k]} return ''}; let hrs=get(['Duration of Inactivity (Hrs)','Duration of Inactivity (Hrs) ​']); let code=get(['Latest Code']); return {orderId:get(['Order ID']),tno:get(['TNO','Tracking NO','Order NO']),city:String(get(['Dest. WHS'])||'').toUpperCase(),segment:get(['Segment']),route:String(get(['Route NO'])||''),partner:get(['Partner Name']),latestCode:String(code||''),latestStatusTime:normalizeDateTime(get(['Latest Status Time(UTC)','Latest Status Time'])),latestWHS:get(['Latest WHS']),driverAtInactive:String(get(['Driver ID at Inactivity'])||''),currentDriver:String(get(['Current Driver ID'])||''),lastScanStatus:get(['Status of Last Scan']),lastScanDriver:String(get(['Driver ID of Last Scan'])||''),durationHrs:hrs, recoveryTime:get(['Recovery Time']), recoveredWithinDeadline:get(['Recovered Within Deadline']), currentTrackingStatus:get(['Current Tracking Status']), inactiveParcelStatus:get(['Inactive Parcel Status']), agingBucket:bucket(hrs), rootCause:rootCause(code), isRecovered:false};}
-document.getElementById('fileInput').addEventListener('change', async (e)=>{let file=e.target.files[0]; if(!file)return; if(!window.XLSX){document.getElementById('warnings').innerHTML='<div class="warn">SheetJS failed to load. Please connect to internet or use embedded data.</div>'; return} let buf=await file.arrayBuffer(); let wb=XLSX.read(buf); let ws=wb.Sheets[wb.SheetNames[0]]; let json=XLSX.utils.sheet_to_json(ws,{defval:''}); sourceRows=json.map(normalizeRow).filter(r=>CITIES.includes(r.city)); sourceRows=sourceRows.map(r=>({...r,isRecovered:isRecoveredRecord(r)})); buildRows(); activeCity='ALL'; document.querySelectorAll('.navbtn').forEach(x=>x.classList.toggle('active',x.dataset.city==='ALL')); document.getElementById('warnings').innerHTML=`<div class="warn">Loaded ${fmt(rows.length)} monitored inactive records from ${file.name}. ${fmt(removedRecovered)} recovered/closed, ${fmt(removedNonActionable)} not-in-scope status, and ${fmt(removedManual)} manually uploaded updated records were excluded.</div>`; render(); celebrate();});
+function normalizeRow(r, ctx={}){let get=(names)=>{for(const n of names){let k=Object.keys(r).find(x=>x.trim().replace(/\u200b/g,'').toLowerCase()===n.toLowerCase()); if(k)return r[k]} return ''}; let hrs=get(['Duration of Inactivity (Hrs)','Duration of Inactivity (Hrs) ​']); let code=get(['Latest Code']); let rawLatest=get(['Latest Status Time(UTC)','Latest Status Time']); return {orderId:get(['Order ID']),tno:get(['TNO','Tracking NO','Order NO']),city:String(get(['Dest. WHS'])||'').toUpperCase(),segment:get(['Segment']),route:String(get(['Route NO'])||''),partner:get(['Partner Name']),latestCode:String(code||''),latestStatusTime:normalizeStatusTime(rawLatest, hrs, ctx.snapshotDate),latestWHS:get(['Latest WHS']),driverAtInactive:String(get(['Driver ID at Inactivity'])||''),currentDriver:String(get(['Current Driver ID'])||''),lastScanStatus:get(['Status of Last Scan']),lastScanDriver:String(get(['Driver ID of Last Scan'])||''),durationHrs:hrs, recoveryTime:get(['Recovery Time']), recoveredWithinDeadline:get(['Recovered Within Deadline']), currentTrackingStatus:get(['Current Tracking Status']), inactiveParcelStatus:get(['Inactive Parcel Status']), agingBucket:bucket(hrs), rootCause:rootCause(code), isRecovered:false};}
+document.getElementById('fileInput').addEventListener('change', async (e)=>{let file=e.target.files[0]; if(!file)return; if(!window.XLSX){document.getElementById('warnings').innerHTML='<div class="warn">SheetJS failed to load. Please connect to internet or use embedded data.</div>'; return} let buf=await file.arrayBuffer(); let snapshotDate=extractDateFromFilename(file.name, file); let wb=XLSX.read(buf,{cellDates:true}); let ws=wb.Sheets[wb.SheetNames[0]]; let json=XLSX.utils.sheet_to_json(ws,{defval:'', raw:false}); sourceRows=json.map(r=>normalizeRow(r,{snapshotDate})).filter(r=>CITIES.includes(r.city)); sourceRows=sourceRows.map(r=>({...r,isRecovered:isRecoveredRecord(r)})); buildRows(); activeCity='ALL'; document.querySelectorAll('.navbtn').forEach(x=>x.classList.toggle('active',x.dataset.city==='ALL')); document.getElementById('warnings').innerHTML=`<div class="warn">Loaded ${fmt(rows.length)} monitored inactive records from ${file.name}. ${fmt(removedRecovered)} recovered/closed, ${fmt(removedNonActionable)} not-in-scope status, and ${fmt(removedManual)} manually uploaded updated records were excluded.</div>`; render(); celebrate();});
 async function extractRemovalIds(file){
   const ids = new Set();
   const addVal = (v)=>{
@@ -613,12 +647,12 @@ if(historyInputEl){
     for(const file of files){
       try{
         const buf=await file.arrayBuffer();
-        const wb=XLSX.read(buf);
-        const ws=wb.Sheets[wb.SheetNames[0]];
-        const json=XLSX.utils.sheet_to_json(ws,{defval:''});
-        const normalized=json.map(normalizeRow).filter(r=>CITIES.includes(r.city));
-        const rowsForSnapshot=buildRowsFromSourceForHistory(normalized);
         const date=extractDateFromFilename(file.name, file);
+        const wb=XLSX.read(buf,{cellDates:true});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const json=XLSX.utils.sheet_to_json(ws,{defval:'', raw:false});
+        const normalized=json.map(r=>normalizeRow(r,{snapshotDate:date})).filter(r=>CITIES.includes(r.city));
+        const rowsForSnapshot=buildRowsFromSourceForHistory(normalized);
         snaps.push(summarizeSnapshot(rowsForSnapshot, date, file.name));
       }catch(err){console.error(err);}
     }
