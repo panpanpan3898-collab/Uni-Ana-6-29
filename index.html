@@ -155,7 +155,7 @@ function isManuallyRemoved(r){
 }
 function buildRows(){
   const base = sourceRows
-    .map(r=>({...r, rootCause: rootCause(r.latestCode), agingBucket: bucket(r.durationHrs)}))
+    .map(r=>({...r, rootCause: rootCause(r.latestCode), agingBucket: bucket(r.durationHrs, r.latestStatusTime)}))
     .filter(r=>!isRecoveredRecord(r) && isIncludedRecord(r));
   removedRecovered = sourceRows.filter(isRecoveredRecord).length;
   removedNonActionable = sourceRows.filter(r=>!isRecoveredRecord(r) && !isIncludedRecord(r)).length;
@@ -233,10 +233,29 @@ function normalizeStatusTime(rawValue, durationHrs, snapshotDate){
 function dateKey(v){const s=normalizeDateTime(v); return /^\d{4}-\d{2}-\d{2}/.test(s)?s.slice(0,10):(s||'Unknown')}
 function dateLabel(v){const k=dateKey(v); return /^\d{4}-\d{2}-\d{2}$/.test(k)?k.slice(5):k}
 function rootCause(code){let c=codeNum(code); if(c===195)return '195 Linehaul Inac'; if(c===255)return '255 Linehaul Inac'; if(c===199)return '199 Inactive'; if(OOD_CODES.has(c))return 'Out of Delivery'; return 'Other'}
-function bucket(h){h=Number(h); if(h>=336)return '14+ days'; if(h>=168)return '7-14 days'; if(h>=120)return '5-7 days'; if(h>=72)return '3-5 days'; return '<3 days'}
+function parseHours(v){
+  if(v===null || v===undefined || v==='') return NaN;
+  if(typeof v==='number') return v;
+  let s=String(v).replace(/,/g,'').trim();
+  let m=s.match(/-?\d+(?:\.\d+)?/);
+  return m ? Number(m[0]) : NaN;
+}
+function hoursBetween(snapshotDate, latestStatusTime){
+  const d1=new Date((snapshotDate||'').slice(0,10)+'T23:59:59');
+  const s=normalizeDateTime(latestStatusTime);
+  if(!/^\d{4}-\d{2}-\d{2}/.test(s) || isNaN(d1)) return NaN;
+  const d2=new Date(s.replace(' ','T'));
+  if(isNaN(d2)) return NaN;
+  return Math.max(0,(d1-d2)/36e5);
+}
+function bucket(h, latestStatusTime='', snapshotDate=''){
+  let hrs=parseHours(h);
+  if(!Number.isFinite(hrs)) hrs=hoursBetween(snapshotDate, latestStatusTime);
+  if(hrs>=336)return '14+ days'; if(hrs>=168)return '7-14 days'; if(hrs>=120)return '5-7 days'; if(hrs>=72)return '3-5 days'; return '<3 days'
+}
 function filtered(){return activeCity==='ALL'?rows:rows.filter(r=>r.city===activeCity)}
 function group(arr,key){const m={};arr.forEach(r=>{const k=typeof key==='function'?key(r):r[key];m[k]=(m[k]||0)+1});return m}
-function topAgg(arr,key,limit=10){const m={};arr.forEach(r=>{let k=(typeof key==='function'?key(r):r[key])||'Unknown'; if(k==='')k='Unknown'; if(!m[k])m[k]={key:k,total:0,c195:0,c199:0,c255:0,ood:0,c200:0,c202:0,c211:0,c220:0,c231:0,c232:0,seven:0,oldest:''}; let o=m[k]; let c=codeNum(r.latestCode); o.total++; if(c===195)o.c195++; if(c===199)o.c199++; if(c===255)o.c255++; if(OOD_CODES.has(c))o.ood++; if(c===200)o.c200++; if(c===202)o.c202++; if(c===211)o.c211++; if(c===220)o.c220++; if(c===231)o.c231++; if(c===232)o.c232++; if(Number(r.durationHrs)>=168)o.seven++; if(r.latestStatusTime && (!o.oldest || r.latestStatusTime<o.oldest))o.oldest=r.latestStatusTime;}); return Object.values(m).sort((a,b)=>b.total-a.total).slice(0,limit)}
+function topAgg(arr,key,limit=10){const m={};arr.forEach(r=>{let k=(typeof key==='function'?key(r):r[key])||'Unknown'; if(k==='')k='Unknown'; if(!m[k])m[k]={key:k,total:0,c195:0,c199:0,c255:0,ood:0,c200:0,c202:0,c211:0,c220:0,c231:0,c232:0,seven:0,oldest:''}; let o=m[k]; let c=codeNum(r.latestCode); o.total++; if(c===195)o.c195++; if(c===199)o.c199++; if(c===255)o.c255++; if(OOD_CODES.has(c))o.ood++; if(c===200)o.c200++; if(c===202)o.c202++; if(c===211)o.c211++; if(c===220)o.c220++; if(c===231)o.c231++; if(c===232)o.c232++; if(parseHours(r.durationHrs)>=168)o.seven++; if(r.latestStatusTime && (!o.oldest || r.latestStatusTime<o.oldest))o.oldest=r.latestStatusTime;}); return Object.values(m).sort((a,b)=>b.total-a.total).slice(0,limit)}
 function badgeCause(c){let cls=c.includes('OOD')||c.includes('Out of Delivery')?'b-driver':c.includes('195')?'b-sat':c.includes('255')?'b-ex':c.includes('199')?'b-other':'b-other';return `<span class="badge ${cls}">${c}</span>`}
 function barChart(el, data, color='linear-gradient(90deg,var(--orange),var(--orange2),var(--amber))'){let entries=Object.entries(data).sort((a,b)=>b[1]-a[1]);let max=Math.max(1,...entries.map(x=>x[1]));el.innerHTML=entries.map(([k,v])=>`<div class="barrow"><b>${k}</b><div class="barbg"><div class="barfill" style="width:${v/max*100}%;background:${color}"></div></div><span>${fmt(v)}</span></div>`).join('')||'<p class="muted">No data</p>'}
 function stackedAging(el, arr){let order=['3-5 days','5-7 days','7-14 days','14+ days','<3 days'];let colors={'3-5 days':'linear-gradient(90deg,#4ade80,#a3e635)','5-7 days':'linear-gradient(90deg,#ffd166,#ffb703)','7-14 days':'linear-gradient(90deg,#ff9f1c,#ff6a00)','14+ days':'linear-gradient(90deg,#ff4d4d,#ff6a00)','<3 days':'linear-gradient(90deg,#a8a29e,#f5f5f4)'};let m=group(arr,'agingBucket');let total=arr.length||1;el.innerHTML='<div class="pillrow">'+order.map(k=>`<span class="smallpill">${k}: ${fmt(m[k]||0)}</span>`).join('')+'</div>'+order.map(k=>`<div class="barrow"><b>${k}</b><div class="barbg"><div class="barfill" style="width:${(m[k]||0)/total*100}%;background:${colors[k]}"></div></div><span>${fmt(m[k]||0)}</span></div>`).join('')}
@@ -277,7 +296,7 @@ function extractDateFromFilename(name, file){
   return d.toISOString().slice(0,10);
 }
 function buildRowsFromSourceForHistory(src){
-  return src.map(r=>({...r, rootCause: rootCause(r.latestCode), agingBucket: bucket(r.durationHrs)})).filter(r=>!isRecoveredRecord(r) && isIncludedRecord(r));
+  return src.map(r=>({...r, rootCause: rootCause(r.latestCode), agingBucket: bucket(r.durationHrs, r.latestStatusTime)})).filter(r=>!isRecoveredRecord(r) && isIncludedRecord(r));
 }
 function summarizeSnapshot(rowsForSnapshot, date, fileName){
   const keyRows=rowsForSnapshot.filter(r=>{const c=codeNum(r.latestCode); return c!==199 && c!==255;});
@@ -338,7 +357,21 @@ table(document.getElementById('linehaul195Table'),[{label:'Inact. WHS → Dest. 
 table(document.getElementById('linehaul255Table'),[{label:'Inact. WHS → Dest. WHS',key:'key'},{label:'255 (>5d)',key:'gt5'},{label:'Total 255',key:'total'},{label:'Oldest Time',key:'oldest'}],linehaulTable(arr,255));
 let q=(document.getElementById('rawSearch').value||'').toLowerCase(); let raw=keyArr.filter(r=>!q||JSON.stringify(r).toLowerCase().includes(q)).slice(0,500); table(document.getElementById('rawTable'),[{label:'TNO',key:'tno'},{label:'City',key:'city'},{label:'Latest WHS',key:'latestWHS'},{label:'Route',key:'route'},{label:'Driver',key:'driverAtInactive'},{label:'Current Driver',key:'currentDriver'},{label:'Code',key:'latestCode'},{label:'Module',html:r=>badgeCause(r.rootCause)},{label:'Aging',key:'agingBucket'},{label:'Hrs',key:'durationHrs'},{label:'Latest Time',key:'latestStatusTime'},{label:'Status',key:'inactiveParcelStatus'}],raw)}
 function exportCSV(type){let arr=filtered(); if(type==='195')arr=arr.filter(r=>codeNum(r.latestCode)===195); if(type==='255')arr=arr.filter(r=>codeNum(r.latestCode)===255); if(type==='199')arr=arr.filter(r=>codeNum(r.latestCode)===199); if(type==='ood')arr=arr.filter(r=>OOD_CODES.has(codeNum(r.latestCode))); if(type==='raw')arr=arr.filter(r=>{let c=codeNum(r.latestCode); return c!==199 && c!==255;}); let keys=['tno','orderId','city','latestWHS','route','driverAtInactive','currentDriver','latestCode','rootCause','agingBucket','durationHrs','latestStatusTime','inactiveParcelStatus','recoveryTime','recoveredWithinDeadline']; let csv=[keys.join(',')].concat(arr.map(r=>keys.map(k=>'"'+String(r[k]??'').replaceAll('"','""')+'"').join(','))).join('\n'); let a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download=`inactive_${activeCity}_${type}.csv`; a.click();}
-function normalizeRow(r, ctx={}){let get=(names)=>{for(const n of names){let k=Object.keys(r).find(x=>x.trim().replace(/\u200b/g,'').toLowerCase()===n.toLowerCase()); if(k)return r[k]} return ''}; let hrs=get(['Duration of Inactivity (Hrs)','Duration of Inactivity (Hrs) ​']); let code=get(['Latest Code']); let rawLatest=get(['Latest Status Time(UTC)','Latest Status Time']); return {orderId:get(['Order ID']),tno:get(['TNO','Tracking NO','Order NO']),city:String(get(['Dest. WHS'])||'').toUpperCase(),segment:get(['Segment']),route:String(get(['Route NO'])||''),partner:get(['Partner Name']),latestCode:String(code||''),latestStatusTime:normalizeStatusTime(rawLatest, hrs, ctx.snapshotDate),latestWHS:get(['Latest WHS']),driverAtInactive:String(get(['Driver ID at Inactivity'])||''),currentDriver:String(get(['Current Driver ID'])||''),lastScanStatus:get(['Status of Last Scan']),lastScanDriver:String(get(['Driver ID of Last Scan'])||''),durationHrs:hrs, recoveryTime:get(['Recovery Time']), recoveredWithinDeadline:get(['Recovered Within Deadline']), currentTrackingStatus:get(['Current Tracking Status']), inactiveParcelStatus:get(['Inactive Parcel Status']), agingBucket:bucket(hrs), rootCause:rootCause(code), isRecovered:false};}
+function normalizeRow(r, ctx={}){
+  const normKey=x=>String(x||'').replace(/[\u200b\u200c\u200d\ufeff]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
+  let get=(names)=>{
+    const wanted=names.map(normKey);
+    for(const key of Object.keys(r)){ if(wanted.includes(normKey(key))) return r[key]; }
+    return '';
+  };
+  let hrs=get(['Duration of Inactivity (Hrs)','Duration of Inactivity (Hrs) ​']);
+  let code=get(['Latest Code']);
+  let rawLatest=get(['Latest Status Time(UTC)','Latest Status Time']);
+  let latestTime=normalizeStatusTime(rawLatest, hrs, ctx.snapshotDate);
+  let parsedHrs=parseHours(hrs);
+  if(!Number.isFinite(parsedHrs)) parsedHrs=hoursBetween(ctx.snapshotDate, latestTime);
+  return {orderId:get(['Order ID']),tno:get(['TNO','Tracking NO','Order NO']),city:String(get(['Dest. WHS'])||'').toUpperCase(),segment:get(['Segment']),route:String(get(['Route NO'])||''),partner:get(['Partner Name']),latestCode:String(code||''),latestStatusTime:latestTime,latestWHS:get(['Latest WHS']),driverAtInactive:String(get(['Driver ID at Inactivity'])||''),currentDriver:String(get(['Current Driver ID'])||''),lastScanStatus:get(['Status of Last Scan']),lastScanDriver:String(get(['Driver ID of Last Scan'])||''),durationHrs:Number.isFinite(parsedHrs)?Number(parsedHrs.toFixed(2)):'', recoveryTime:get(['Recovery Time']), recoveredWithinDeadline:get(['Recovered Within Deadline']), currentTrackingStatus:get(['Current Tracking Status']), inactiveParcelStatus:get(['Inactive Parcel Status']), agingBucket:bucket(parsedHrs, latestTime, ctx.snapshotDate), rootCause:rootCause(code), isRecovered:false};}
+
 document.getElementById('fileInput').addEventListener('change', async (e)=>{let file=e.target.files[0]; if(!file)return; if(!window.XLSX){document.getElementById('warnings').innerHTML='<div class="warn">SheetJS failed to load. Please connect to internet or use embedded data.</div>'; return} let buf=await file.arrayBuffer(); let snapshotDate=extractDateFromFilename(file.name, file); let wb=XLSX.read(buf,{cellDates:true}); let ws=wb.Sheets[wb.SheetNames[0]]; let json=XLSX.utils.sheet_to_json(ws,{defval:'', raw:true}); sourceRows=json.map(r=>normalizeRow(r,{snapshotDate})).filter(r=>CITIES.includes(r.city)); sourceRows=sourceRows.map(r=>({...r,isRecovered:isRecoveredRecord(r)})); buildRows(); activeCity='ALL'; document.querySelectorAll('.navbtn').forEach(x=>x.classList.toggle('active',x.dataset.city==='ALL')); document.getElementById('warnings').innerHTML=`<div class="warn">Loaded ${fmt(rows.length)} monitored inactive records from ${file.name}. ${fmt(removedRecovered)} recovered/closed, ${fmt(removedNonActionable)} not-in-scope status, and ${fmt(removedManual)} manually uploaded updated records were excluded.</div>`; render(); celebrate();});
 async function extractRemovalIds(file){
   const ids = new Set();
