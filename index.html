@@ -172,6 +172,32 @@ let activeCity='ALL';
 const cityNav=document.getElementById('cityNav'); CITIES.forEach(c=>{const b=document.createElement('button');b.className='navbtn';b.dataset.city=c;b.textContent=c;cityNav.appendChild(b)});
 document.querySelectorAll('.navbtn').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.navbtn').forEach(x=>x.classList.remove('active'));b.classList.add('active');activeCity=b.dataset.city;render();}));
 function n(v){return Number(v)||0} function fmt(x){return (x||0).toLocaleString()} function codeNum(v){let x=parseInt(v);return Number.isFinite(x)?x:null}
+function pad2(v){return String(v).padStart(2,'0')}
+function excelSerialToDateTime(v){
+  const num=Number(v);
+  if(!Number.isFinite(num) || num<20000 || num>80000) return '';
+  const ms=Math.round(num*86400000);
+  const d=new Date(Date.UTC(1899,11,30)+ms);
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth()+1)}-${pad2(d.getUTCDate())} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`;
+}
+function normalizeDateTime(v){
+  if(v===null || v===undefined || v==='') return '';
+  if(v instanceof Date && !isNaN(v)) return `${v.getFullYear()}-${pad2(v.getMonth()+1)}-${pad2(v.getDate())} ${pad2(v.getHours())}:${pad2(v.getMinutes())}:${pad2(v.getSeconds())}`;
+  if(typeof v==='number') return excelSerialToDateTime(v) || String(v);
+  let s=String(v).trim();
+  if(!s) return '';
+  if(/^\d+(\.\d+)?$/.test(s)) return excelSerialToDateTime(s) || s;
+  s=s.replace(/\//g,'-').replace('T',' ');
+  let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if(m) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])} ${pad2(m[4]||0)}:${pad2(m[5]||0)}:${pad2(m[6]||0)}`;
+  m=s.match(/^(\d{1,2})-(\d{1,2})-(\d{2,4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if(m){let y=m[3].length===2?'20'+m[3]:m[3]; return `${y}-${pad2(m[1])}-${pad2(m[2])} ${pad2(m[4]||0)}:${pad2(m[5]||0)}:${pad2(m[6]||0)}`;}
+  const d=new Date(s);
+  if(!isNaN(d)) return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  return s;
+}
+function dateKey(v){const s=normalizeDateTime(v); return /^\d{4}-\d{2}-\d{2}/.test(s)?s.slice(0,10):(s||'Unknown')}
+function dateLabel(v){const k=dateKey(v); return /^\d{4}-\d{2}-\d{2}$/.test(k)?k.slice(5):k}
 function rootCause(code){let c=codeNum(code); if(c===195)return '195 Linehaul Inac'; if(c===255)return '255 Linehaul Inac'; if(c===199)return '199 Inactive'; if(OOD_CODES.has(c))return 'Out of Delivery'; return 'Other'}
 function bucket(h){h=Number(h); if(h>=336)return '14+ days'; if(h>=168)return '7-14 days'; if(h>=120)return '5-7 days'; if(h>=72)return '3-5 days'; return '<3 days'}
 function filtered(){return activeCity==='ALL'?rows:rows.filter(r=>r.city===activeCity)}
@@ -180,7 +206,7 @@ function topAgg(arr,key,limit=10){const m={};arr.forEach(r=>{let k=(typeof key==
 function badgeCause(c){let cls=c.includes('OOD')||c.includes('Out of Delivery')?'b-driver':c.includes('195')?'b-sat':c.includes('255')?'b-ex':c.includes('199')?'b-other':'b-other';return `<span class="badge ${cls}">${c}</span>`}
 function barChart(el, data, color='linear-gradient(90deg,var(--orange),var(--orange2),var(--amber))'){let entries=Object.entries(data).sort((a,b)=>b[1]-a[1]);let max=Math.max(1,...entries.map(x=>x[1]));el.innerHTML=entries.map(([k,v])=>`<div class="barrow"><b>${k}</b><div class="barbg"><div class="barfill" style="width:${v/max*100}%;background:${color}"></div></div><span>${fmt(v)}</span></div>`).join('')||'<p class="muted">No data</p>'}
 function stackedAging(el, arr){let order=['3-5 days','5-7 days','7-14 days','14+ days','<3 days'];let colors={'3-5 days':'linear-gradient(90deg,#4ade80,#a3e635)','5-7 days':'linear-gradient(90deg,#ffd166,#ffb703)','7-14 days':'linear-gradient(90deg,#ff9f1c,#ff6a00)','14+ days':'linear-gradient(90deg,#ff4d4d,#ff6a00)','<3 days':'linear-gradient(90deg,#a8a29e,#f5f5f4)'};let m=group(arr,'agingBucket');let total=arr.length||1;el.innerHTML='<div class="pillrow">'+order.map(k=>`<span class="smallpill">${k}: ${fmt(m[k]||0)}</span>`).join('')+'</div>'+order.map(k=>`<div class="barrow"><b>${k}</b><div class="barbg"><div class="barfill" style="width:${(m[k]||0)/total*100}%;background:${colors[k]}"></div></div><span>${fmt(m[k]||0)}</span></div>`).join('')}
-function lineChart(el, arr){let m={}; arr.forEach(r=>{let d=(r.latestStatusTime||'').slice(0,10)||'Unknown'; m[d]=(m[d]||0)+1}); let entries=Object.entries(m).sort().slice(-20); if(entries.length<2){barChart(el,m);return} let w=620,h=230,p=34,max=Math.max(...entries.map(x=>x[1]),1); let pts=entries.map((x,i)=>[p+i*(w-2*p)/(entries.length-1), h-p-(x[1]/max)*(h-2*p)]); let path=pts.map((p,i)=>(i?'L':'M')+p[0]+','+p[1]).join(' '); el.innerHTML=`<svg viewBox="0 0 ${w} ${h}" width="100%" height="260"><defs><linearGradient id="lineGrad" x1="0" x2="1"><stop offset="0%" stop-color="#ff6a00"/><stop offset="55%" stop-color="#ff9f1c"/><stop offset="100%" stop-color="#ffd166"/></linearGradient></defs><path d="${path}" fill="none" stroke="url(#lineGrad)" stroke-width="4"/><line x1="${p}" y1="${h-p}" x2="${w-p}" y2="${h-p}" stroke="rgba(255,255,255,.22)"/><line x1="${p}" y1="${p}" x2="${p}" y2="${h-p}" stroke="rgba(255,255,255,.22)"/>${pts.map((pt,i)=>`<g><circle cx="${pt[0]}" cy="${pt[1]}" r="4" fill="#ff9f1c"><title>${entries[i][0]}: ${entries[i][1]}</title></circle><text x="${pt[0]}" y="${Math.max(14, pt[1]-10)}" font-size="11" font-weight="700" text-anchor="middle" fill="#ffffff" stroke="rgba(15,17,21,.75)" stroke-width="3" paint-order="stroke">${entries[i][1]}</text></g>`).join('')}${entries.map((e,i)=>i%Math.ceil(entries.length/6)===0?`<text x="${pts[i][0]}" y="${h-8}" font-size="10" text-anchor="middle" fill="#c8b9a8">${e[0].slice(5)}</text>`:'').join('')}</svg>`}
+function lineChart(el, arr){let m={}; arr.forEach(r=>{let d=dateKey(r.latestStatusTime); if(d && d!=='Unknown') m[d]=(m[d]||0)+1}); let entries=Object.entries(m).sort().slice(-20); if(entries.length<2){barChart(el,m);return} let w=620,h=230,p=34,max=Math.max(...entries.map(x=>x[1]),1); let pts=entries.map((x,i)=>[p+i*(w-2*p)/(entries.length-1), h-p-(x[1]/max)*(h-2*p)]); let path=pts.map((p,i)=>(i?'L':'M')+p[0]+','+p[1]).join(' '); el.innerHTML=`<svg viewBox="0 0 ${w} ${h}" width="100%" height="260"><defs><linearGradient id="lineGrad" x1="0" x2="1"><stop offset="0%" stop-color="#ff6a00"/><stop offset="55%" stop-color="#ff9f1c"/><stop offset="100%" stop-color="#ffd166"/></linearGradient></defs><path d="${path}" fill="none" stroke="url(#lineGrad)" stroke-width="4"/><line x1="${p}" y1="${h-p}" x2="${w-p}" y2="${h-p}" stroke="rgba(255,255,255,.22)"/><line x1="${p}" y1="${p}" x2="${p}" y2="${h-p}" stroke="rgba(255,255,255,.22)"/>${pts.map((pt,i)=>`<g><circle cx="${pt[0]}" cy="${pt[1]}" r="4" fill="#ff9f1c"><title>${entries[i][0]}: ${entries[i][1]}</title></circle><text x="${pt[0]}" y="${Math.max(14, pt[1]-10)}" font-size="11" font-weight="700" text-anchor="middle" fill="#ffffff" stroke="rgba(15,17,21,.75)" stroke-width="3" paint-order="stroke">${entries[i][1]}</text></g>`).join('')}${entries.map((e,i)=>i%Math.ceil(entries.length/6)===0?`<text x="${pts[i][0]}" y="${h-8}" font-size="10" text-anchor="middle" fill="#c8b9a8">${dateLabel(e[0])}</text>`:'').join('')}</svg>`}
 function table(el, cols, data){el.innerHTML=`<table><thead><tr>${cols.map(c=>`<th>${c.label}</th>`).join('')}</tr></thead><tbody>${data.map(r=>`<tr>${cols.map(c=>`<td>${c.html?c.html(r):(r[c.key]??'')}</td>`).join('')}</tr>`).join('')}</tbody></table>`}
 
 function statusMatrix(arr){
@@ -229,11 +255,11 @@ function pointLineChart(el, points, valueKey='value', labelKey='date'){
   if(!el) return;
   const entries=(points||[]).map(p=>[String(p[labelKey]), Number(p[valueKey])||0]);
   if(entries.length===0){el.innerHTML='<p class="muted">Upload historical Excel files to generate trend.</p>';return;}
-  if(entries.length===1){el.innerHTML=`<div class="barrow"><b>${entries[0][0].slice(5)||entries[0][0]}</b><div class="barbg"><div class="barfill" style="width:100%"></div></div><span>${fmt(entries[0][1])}</span></div>`;return;}
+  if(entries.length===1){el.innerHTML=`<div class="barrow"><b>${dateLabel(entries[0][0])}</b><div class="barbg"><div class="barfill" style="width:100%"></div></div><span>${fmt(entries[0][1])}</span></div>`;return;}
   let w=620,h=230,pad=36,max=Math.max(...entries.map(x=>x[1]),1);
   let pts=entries.map((x,i)=>[pad+i*(w-2*pad)/(entries.length-1), h-pad-(x[1]/max)*(h-2*pad)]);
   let path=pts.map((pt,i)=>(i?'L':'M')+pt[0]+','+pt[1]).join(' ');
-  el.innerHTML=`<svg viewBox="0 0 ${w} ${h}" width="100%" height="260"><path d="${path}" fill="none" stroke="#ff8a1f" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="rgba(255,255,255,.22)"/><line x1="${pad}" y1="${pad}" x2="${pad}" y2="${h-pad}" stroke="rgba(255,255,255,.22)"/>${pts.map((pt,i)=>`<g><circle cx="${pt[0]}" cy="${pt[1]}" r="4.5" fill="#ff9f1c"><title>${entries[i][0]}: ${entries[i][1]}</title></circle><text x="${pt[0]}" y="${Math.max(14, pt[1]-11)}" font-size="11" font-weight="700" text-anchor="middle" fill="#ffffff" stroke="rgba(15,17,21,.75)" stroke-width="3" paint-order="stroke">${entries[i][1]}</text></g>`).join('')}${entries.map((e,i)=>`<text x="${pts[i][0]}" y="${h-8}" font-size="10" text-anchor="middle" fill="#c8b9a8">${e[0].slice(5)}</text>`).join('')}</svg>`;
+  el.innerHTML=`<svg viewBox="0 0 ${w} ${h}" width="100%" height="260"><path d="${path}" fill="none" stroke="#ff8a1f" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="rgba(255,255,255,.22)"/><line x1="${pad}" y1="${pad}" x2="${pad}" y2="${h-pad}" stroke="rgba(255,255,255,.22)"/>${pts.map((pt,i)=>`<g><circle cx="${pt[0]}" cy="${pt[1]}" r="4.5" fill="#ff9f1c"><title>${entries[i][0]}: ${entries[i][1]}</title></circle><text x="${pt[0]}" y="${Math.max(14, pt[1]-11)}" font-size="11" font-weight="700" text-anchor="middle" fill="#ffffff" stroke="rgba(15,17,21,.75)" stroke-width="3" paint-order="stroke">${entries[i][1]}</text></g>`).join('')}${entries.map((e,i)=>`<text x="${pts[i][0]}" y="${h-8}" font-size="10" text-anchor="middle" fill="#c8b9a8">${dateLabel(e[0])}</text>`).join('')}</svg>`;
 }
 function dualLineChart(el, points){
   if(!el) return;
@@ -245,7 +271,7 @@ function dualLineChart(el, points){
   const p195=makePts('c195'), pood=makePts('ood');
   const path=(pts)=>pts.map((pt,i)=>(i?'L':'M')+pt[0]+','+pt[1]).join(' ');
   const dots=(pts,key,color)=>pts.map((pt,i)=>`<g><circle cx="${pt[0]}" cy="${pt[1]}" r="4.2" fill="${color}"><title>${data[i].date}: ${data[i][key]}</title></circle><text x="${pt[0]}" y="${Math.max(14, pt[1]-10)}" font-size="10" font-weight="700" text-anchor="middle" fill="#ffffff" stroke="rgba(15,17,21,.75)" stroke-width="3" paint-order="stroke">${data[i][key]}</text></g>`).join('');
-  el.innerHTML=`<svg viewBox="0 0 ${w} ${h}" width="100%" height="270"><line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="rgba(255,255,255,.22)"/><line x1="${pad}" y1="${pad}" x2="${pad}" y2="${h-pad}" stroke="rgba(255,255,255,.22)"/><path d="${path(p195)}" fill="none" stroke="#b884ff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="${path(pood)}" fill="none" stroke="#ff8a1f" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>${dots(p195,'c195','#b884ff')}${dots(pood,'ood','#ff8a1f')}${data.map((d,i)=>`<text x="${p195[i][0]}" y="${h-8}" font-size="10" text-anchor="middle" fill="#c8b9a8">${String(d.date).slice(5)}</text>`).join('')}<g transform="translate(${pad},16)"><circle cx="0" cy="0" r="4" fill="#b884ff"/><text x="10" y="4" font-size="11" fill="#fff">195</text><circle cx="70" cy="0" r="4" fill="#ff8a1f"/><text x="80" y="4" font-size="11" fill="#fff">200+ OOD</text></g></svg>`;
+  el.innerHTML=`<svg viewBox="0 0 ${w} ${h}" width="100%" height="270"><line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="rgba(255,255,255,.22)"/><line x1="${pad}" y1="${pad}" x2="${pad}" y2="${h-pad}" stroke="rgba(255,255,255,.22)"/><path d="${path(p195)}" fill="none" stroke="#b884ff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="${path(pood)}" fill="none" stroke="#ff8a1f" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>${dots(p195,'c195','#b884ff')}${dots(pood,'ood','#ff8a1f')}${data.map((d,i)=>`<text x="${p195[i][0]}" y="${h-8}" font-size="10" text-anchor="middle" fill="#c8b9a8">${dateLabel(d.date)}</text>`).join('')}<g transform="translate(${pad},16)"><circle cx="0" cy="0" r="4" fill="#b884ff"/><text x="10" y="4" font-size="11" fill="#fff">195</text><circle cx="70" cy="0" r="4" fill="#ff8a1f"/><text x="80" y="4" font-size="11" fill="#fff">200+ OOD</text></g></svg>`;
 }
 function renderHistory(){
   const count=document.getElementById('historyLoadedCount'); if(count) count.textContent=fmt(historicalSnapshots.length);
@@ -278,7 +304,7 @@ table(document.getElementById('linehaul195Table'),[{label:'Inact. WHS → Dest. 
 table(document.getElementById('linehaul255Table'),[{label:'Inact. WHS → Dest. WHS',key:'key'},{label:'255 (>5d)',key:'gt5'},{label:'Total 255',key:'total'},{label:'Oldest Time',key:'oldest'}],linehaulTable(arr,255));
 let q=(document.getElementById('rawSearch').value||'').toLowerCase(); let raw=keyArr.filter(r=>!q||JSON.stringify(r).toLowerCase().includes(q)).slice(0,500); table(document.getElementById('rawTable'),[{label:'TNO',key:'tno'},{label:'City',key:'city'},{label:'Latest WHS',key:'latestWHS'},{label:'Route',key:'route'},{label:'Driver',key:'driverAtInactive'},{label:'Current Driver',key:'currentDriver'},{label:'Code',key:'latestCode'},{label:'Module',html:r=>badgeCause(r.rootCause)},{label:'Aging',key:'agingBucket'},{label:'Hrs',key:'durationHrs'},{label:'Latest Time',key:'latestStatusTime'},{label:'Status',key:'inactiveParcelStatus'}],raw)}
 function exportCSV(type){let arr=filtered(); if(type==='195')arr=arr.filter(r=>codeNum(r.latestCode)===195); if(type==='255')arr=arr.filter(r=>codeNum(r.latestCode)===255); if(type==='199')arr=arr.filter(r=>codeNum(r.latestCode)===199); if(type==='ood')arr=arr.filter(r=>OOD_CODES.has(codeNum(r.latestCode))); if(type==='raw')arr=arr.filter(r=>{let c=codeNum(r.latestCode); return c!==199 && c!==255;}); let keys=['tno','orderId','city','latestWHS','route','driverAtInactive','currentDriver','latestCode','rootCause','agingBucket','durationHrs','latestStatusTime','inactiveParcelStatus','recoveryTime','recoveredWithinDeadline']; let csv=[keys.join(',')].concat(arr.map(r=>keys.map(k=>'"'+String(r[k]??'').replaceAll('"','""')+'"').join(','))).join('\n'); let a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download=`inactive_${activeCity}_${type}.csv`; a.click();}
-function normalizeRow(r){let get=(names)=>{for(const n of names){let k=Object.keys(r).find(x=>x.trim().replace(/\u200b/g,'').toLowerCase()===n.toLowerCase()); if(k)return r[k]} return ''}; let hrs=get(['Duration of Inactivity (Hrs)','Duration of Inactivity (Hrs) ​']); let code=get(['Latest Code']); return {orderId:get(['Order ID']),tno:get(['TNO','Tracking NO','Order NO']),city:String(get(['Dest. WHS'])||'').toUpperCase(),segment:get(['Segment']),route:String(get(['Route NO'])||''),partner:get(['Partner Name']),latestCode:String(code||''),latestStatusTime:String(get(['Latest Status Time(UTC)','Latest Status Time'])||''),latestWHS:get(['Latest WHS']),driverAtInactive:String(get(['Driver ID at Inactivity'])||''),currentDriver:String(get(['Current Driver ID'])||''),lastScanStatus:get(['Status of Last Scan']),lastScanDriver:String(get(['Driver ID of Last Scan'])||''),durationHrs:hrs, recoveryTime:get(['Recovery Time']), recoveredWithinDeadline:get(['Recovered Within Deadline']), currentTrackingStatus:get(['Current Tracking Status']), inactiveParcelStatus:get(['Inactive Parcel Status']), agingBucket:bucket(hrs), rootCause:rootCause(code), isRecovered:false};}
+function normalizeRow(r){let get=(names)=>{for(const n of names){let k=Object.keys(r).find(x=>x.trim().replace(/\u200b/g,'').toLowerCase()===n.toLowerCase()); if(k)return r[k]} return ''}; let hrs=get(['Duration of Inactivity (Hrs)','Duration of Inactivity (Hrs) ​']); let code=get(['Latest Code']); return {orderId:get(['Order ID']),tno:get(['TNO','Tracking NO','Order NO']),city:String(get(['Dest. WHS'])||'').toUpperCase(),segment:get(['Segment']),route:String(get(['Route NO'])||''),partner:get(['Partner Name']),latestCode:String(code||''),latestStatusTime:normalizeDateTime(get(['Latest Status Time(UTC)','Latest Status Time'])),latestWHS:get(['Latest WHS']),driverAtInactive:String(get(['Driver ID at Inactivity'])||''),currentDriver:String(get(['Current Driver ID'])||''),lastScanStatus:get(['Status of Last Scan']),lastScanDriver:String(get(['Driver ID of Last Scan'])||''),durationHrs:hrs, recoveryTime:get(['Recovery Time']), recoveredWithinDeadline:get(['Recovered Within Deadline']), currentTrackingStatus:get(['Current Tracking Status']), inactiveParcelStatus:get(['Inactive Parcel Status']), agingBucket:bucket(hrs), rootCause:rootCause(code), isRecovered:false};}
 document.getElementById('fileInput').addEventListener('change', async (e)=>{let file=e.target.files[0]; if(!file)return; if(!window.XLSX){document.getElementById('warnings').innerHTML='<div class="warn">SheetJS failed to load. Please connect to internet or use embedded data.</div>'; return} let buf=await file.arrayBuffer(); let wb=XLSX.read(buf); let ws=wb.Sheets[wb.SheetNames[0]]; let json=XLSX.utils.sheet_to_json(ws,{defval:''}); sourceRows=json.map(normalizeRow).filter(r=>CITIES.includes(r.city)); sourceRows=sourceRows.map(r=>({...r,isRecovered:isRecoveredRecord(r)})); buildRows(); activeCity='ALL'; document.querySelectorAll('.navbtn').forEach(x=>x.classList.toggle('active',x.dataset.city==='ALL')); document.getElementById('warnings').innerHTML=`<div class="warn">Loaded ${fmt(rows.length)} monitored inactive records from ${file.name}. ${fmt(removedRecovered)} recovered/closed, ${fmt(removedNonActionable)} not-in-scope status, and ${fmt(removedManual)} manually uploaded updated records were excluded.</div>`; render(); celebrate();});
 async function extractRemovalIds(file){
   const ids = new Set();
@@ -372,7 +398,7 @@ function pdfBars(title, data){
 function pdfLineChart(title, arr){
   const m={};
   arr.forEach(r=>{
-    const d=(r.latestStatusTime||'').slice(0,10) || 'Unknown';
+    const d=dateKey(r.latestStatusTime);
     if(d && d !== 'Unknown') m[d]=(m[d]||0)+1;
   });
   const entries=Object.entries(m).sort().slice(-18);
@@ -395,7 +421,7 @@ function pdfLineChart(title, arr){
     <line class="pdf-axis" x1="${pL}" y1="${h-pB}" x2="${w-pR}" y2="${h-pB}"/><line class="pdf-axis" x1="${pL}" y1="${pT}" x2="${pL}" y2="${h-pB}"/>
     <path class="pdf-line" d="${path}"/>
     ${pts.map((pt,i)=>`<g><circle class="pdf-dot" cx="${pt[0].toFixed(1)}" cy="${pt[1].toFixed(1)}" r="3"><title>${escapeHtml(pt[2])}: ${fmt(pt[3])}</title></circle><text class="pdf-point-label" x="${pt[0].toFixed(1)}" y="${Math.max(10, pt[1]-7).toFixed(1)}" text-anchor="middle">${fmt(pt[3])}</text></g>`).join('')}
-    ${pts.map((pt,i)=> i%tickStep===0 || i===pts.length-1 ? `<text class="pdf-label" x="${pt[0].toFixed(1)}" y="${h-8}" text-anchor="middle">${escapeHtml(pt[2].slice(5))}</text>` : '').join('')}
+    ${pts.map((pt,i)=> i%tickStep===0 || i===pts.length-1 ? `<text class="pdf-label" x="${pt[0].toFixed(1)}" y="${h-8}" text-anchor="middle">${escapeHtml(dateLabel(pt[2]))}</text>` : '').join('')}
   </svg><div class="pdf-section-note">Based on Latest Status Time in the uploaded inactive file.</div></div>`;
 }
 function pdfSummaryFor(city){
@@ -434,8 +460,8 @@ function buildPdfPage(city){
 function trendEntriesForPdf(arr){
   const m={};
   arr.forEach(r=>{
-    const d=(r.latestStatusTime||'').slice(0,10);
-    if(d) m[d]=(m[d]||0)+1;
+    const d=dateKey(r.latestStatusTime);
+    if(d && d !== 'Unknown') m[d]=(m[d]||0)+1;
   });
   return Object.entries(m).sort().slice(-18).map(([date,count])=>({date,count}));
 }
@@ -499,7 +525,7 @@ function drawPdfLineChart(doc, title, entries, x, y, w, h, color){
     doc.text(fmt(pt.count),pt.x,ty,{align:'center'});
     if(i===0 || i===pts.length-1 || i%Math.ceil(pts.length/6)===0){
       doc.setFont('helvetica','normal'); doc.setFontSize(5.6); doc.setTextColor(95,95,95);
-      doc.text(pt.date.slice(5),pt.x,py+ch+0.16,{align:'center'});
+      doc.text(dateLabel(pt.date),pt.x,py+ch+0.16,{align:'center'});
     }
   });
 }
