@@ -634,7 +634,14 @@ function pdfSummaryFor(city){
   const kpis=[['Total Key Inactive',keyArr.length],['200+',oodArr.length],['195 Linehaul Inac',c195],['7+ Days',seven]];
   if(city==='ALL') kpis.push(['Reference 199',c199],['Reference 255',c255],['Manual Removed',removedManual],['Recovered / Closed',removedRecovered]);
   const routes=topAgg(oodArr,'route',8);
-  const drivers=topAgg(oodArr.filter(r=>validDriverKey(r)), validDriverKey,12);
+  const drivers=topAgg(
+    oodArr.filter(r=>{
+      const assignedDriver = String(r.driverAtInactive ?? '').trim();
+      return assignedDriver && assignedDriver !== '-1' && assignedDriver !== 'Unknown';
+    }),
+    r=>String(r.driverAtInactive ?? '').trim(),
+    12
+  );
   const line195=linehaulTable(keyArr,195).slice(0,8);
   const status=statusMatrix(oodArr).slice(0,8);
   return {arr,keyArr,oodArr,kpis,routes,drivers,line195,status};
@@ -776,7 +783,7 @@ function addPdfPageManual(doc, city, pageNo){
   y += rowH + 0.12;
   drawPdfTable(doc,'200+ status matrix',[{label:'WHS',key:'whs'},{label:'200',key:'c200'},{label:'202',key:'c202'},{label:'211',key:'c211'},{label:'220',key:'c220'},{label:'231',key:'c231'},{label:'232',key:'c232'},{label:'Other 200+',key:'cOther200'},{label:'Total',key:'total'}],s.status,x1,y,colW,rowH);
   doc.setFont('helvetica','normal'); doc.setFontSize(6); doc.setTextColor(120,120,120);
-  doc.text('Data-only PDF export. Top 200+ drivers are expanded; 195 Linehaul Inac detail block is excluded from PDF. All 1910 records are excluded from the report scope.',0.35,8.08);
+  doc.text('Data-only PDF export. Top 200+ drivers are expanded; driver ID -1 is excluded from PDF driver rankings; 195 Linehaul Inac detail block is excluded from PDF. All 1910 records are excluded from the report scope.',0.35,8.08);
 }
 async function downloadReportPdf(filename, pageCities){
   const overlay=document.createElement('div'); overlay.className='pdf-working'; overlay.textContent='Generating PDF…'; document.body.appendChild(overlay);
