@@ -503,13 +503,29 @@ function setHistoryMode(on){
   document.querySelectorAll('.main > .card, .main > .grid').forEach(el=>{ if(el.id==='historyPanel') return; el.style.display=on?'none':''; });
 }
 
+function segmentPrefix(segment){
+  const s=String(segment||'').trim().toUpperCase();
+  if(!s) return '';
+  return s.split(/[-_\s]/)[0] || s;
+}
+function rawWHSKeys(r){
+  const keys=new Set();
+  [r.city, r.latestWHS, r.segment].forEach(v=>{ const s=String(v||'').trim().toUpperCase(); if(s) keys.add(s); });
+  const seg=segmentPrefix(r.segment); if(seg) keys.add(seg);
+  return [...keys];
+}
+function rawStationLabel(r){
+  const seg=segmentPrefix(r.segment);
+  if(seg && seg!==String(r.city||'').toUpperCase()) return seg;
+  return String(r.city||r.latestWHS||'').toUpperCase();
+}
 function refreshRawFilters(){
   const whsSel=document.getElementById('rawWarehouseFilter');
   const statusSel=document.getElementById('rawStatusFilter');
   if(!whsSel || !statusSel) return;
   const keepW=whsSel.value||'ALL', keepS=statusSel.value||'ALL';
-  const whs=[...new Set((allRows||[]).map(r=>r.city).filter(Boolean))].sort();
-  whsSel.innerHTML='<option value="ALL">All WHS</option>'+whs.map(w=>`<option value="${w}">${w}</option>`).join('');
+  const whs=[...new Set((allRows||[]).flatMap(rawWHSKeys).filter(Boolean))].sort();
+  whsSel.innerHTML='<option value="ALL">All WHS / Satellite</option>'+whs.map(w=>`<option value="${w}">${w}</option>`).join('');
   if(whs.includes(keepW)) whsSel.value=keepW;
   const statuses=[...new Set((allRows||[]).map(r=>String(r.latestCode||'').trim()).filter(Boolean))].sort((a,b)=>(Number(a)||0)-(Number(b)||0));
   statusSel.innerHTML='<option value="ALL">All Status</option>'+statuses.map(c=>`<option value="${c}">${c}</option>`).join('');
@@ -521,7 +537,7 @@ function getRawFilteredRows(){
   const status=document.getElementById('rawStatusFilter')?.value||'ALL';
   const aging=document.getElementById('rawAgingFilter')?.value||'ALL';
   return (allRows||[]).filter(r=>{
-    if(whs!=='ALL' && r.city!==whs) return false;
+    if(whs!=='ALL' && !rawWHSKeys(r).includes(whs)) return false;
     if(status!=='ALL' && String(r.latestCode||'').trim()!==status) return false;
     if(aging!=='ALL' && r.agingBucket!==aging) return false;
     if(q && !JSON.stringify(r).toLowerCase().includes(q)) return false;
@@ -544,8 +560,8 @@ table(document.getElementById('transit199Table'),[{label:'Inactive WHS',key:'key
 table(document.getElementById('oodTable'),[{label:'WHS',key:'whs'},{label:'200',key:'c200'},{label:'202',key:'c202'},{label:'211',key:'c211'},{label:'220',key:'c220'},{label:'231',key:'c231'},{label:'232',key:'c232'},{label:'Other 200+',key:'cOther200'},{label:'Total 200+',key:'total'}],statusMatrix(oodArr));
 table(document.getElementById('linehaul195Table'),[{label:'Inact. WHS → Dest. WHS',key:'key'},{label:'195 (<14d)',key:'lt14'},{label:'195 (>14d)',key:'gt14'},{label:'Total',key:'total'},{label:'Oldest Time',key:'oldest'}],linehaulTable(keyArr,195));
 table(document.getElementById('linehaul255Table'),[{label:'Inact. WHS → Dest. WHS',key:'key'},{label:'255 (>5d)',key:'gt5'},{label:'Total 255',key:'total'},{label:'Oldest Time',key:'oldest'}],linehaulTable(arr,255));
-refreshRawFilters(); let rawAll=getRawFilteredRows(); let raw=rawAll.slice(0,500); const rawCount=document.getElementById('rawCount'); if(rawCount) rawCount.textContent=`Showing ${fmt(raw.length)} / ${fmt(rawAll.length)} records${rawAll.length>500?' (first 500 displayed)':''}`; table(document.getElementById('rawTable'),[{label:'TNO',key:'tno'},{label:'City',key:'city'},{label:'Latest WHS',key:'latestWHS'},{label:'Route',key:'route'},{label:'Driver',key:'driverAtInactive'},{label:'Current Driver',key:'currentDriver'},{label:'Code',key:'latestCode'},{label:'Module',html:r=>badgeCause(r.rootCause)},{label:'Aging',key:'agingBucket'},{label:'Hrs',key:'durationHrs'},{label:'Latest Time',key:'latestStatusTime'},{label:'Status',key:'inactiveParcelStatus'}],raw)}
-function exportCSV(type){let arr=filtered(); if(type==='195')arr=arr.filter(r=>codeNum(r.latestCode)===195); if(type==='255')arr=arr.filter(r=>codeNum(r.latestCode)===255); if(type==='199')arr=arr.filter(r=>codeNum(r.latestCode)===199); if(type==='ood')arr=arr.filter(r=>isPost200ReportCode(codeNum(r.latestCode))); if(type==='raw')arr=getRawFilteredRows(); let keys=['tno','orderId','city','latestWHS','route','driverAtInactive','currentDriver','latestCode','rootCause','agingBucket','durationHrs','latestStatusTime','inactiveParcelStatus','recoveryTime','recoveredWithinDeadline']; let csv=[keys.join(',')].concat(arr.map(r=>keys.map(k=>'"'+String(r[k]??'').replaceAll('"','""')+'"').join(','))).join('\n'); let a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download=`inactive_${activeCity}_${type}.csv`; a.click();}
+refreshRawFilters(); let rawAll=getRawFilteredRows(); let raw=rawAll.slice(0,500); const rawCount=document.getElementById('rawCount'); if(rawCount) rawCount.textContent=`Showing ${fmt(raw.length)} / ${fmt(rawAll.length)} records${rawAll.length>500?' (first 500 displayed)':''}`; table(document.getElementById('rawTable'),[{label:'TNO',key:'tno'},{label:'Dest WHS',key:'city'},{label:'Satellite',html:r=>rawStationLabel(r)},{label:'Segment',key:'segment'},{label:'Latest WHS',key:'latestWHS'},{label:'Route',key:'route'},{label:'Driver',key:'driverAtInactive'},{label:'Current Driver',key:'currentDriver'},{label:'Code',key:'latestCode'},{label:'Module',html:r=>badgeCause(r.rootCause)},{label:'Aging',key:'agingBucket'},{label:'Hrs',key:'durationHrs'},{label:'Latest Time',key:'latestStatusTime'},{label:'Status',key:'inactiveParcelStatus'}],raw)}
+function exportCSV(type){let arr=filtered(); if(type==='195')arr=arr.filter(r=>codeNum(r.latestCode)===195); if(type==='255')arr=arr.filter(r=>codeNum(r.latestCode)===255); if(type==='199')arr=arr.filter(r=>codeNum(r.latestCode)===199); if(type==='ood')arr=arr.filter(r=>isPost200ReportCode(codeNum(r.latestCode))); if(type==='raw')arr=getRawFilteredRows(); let keys=['tno','orderId','city','segment','latestWHS','route','driverAtInactive','currentDriver','latestCode','rootCause','agingBucket','durationHrs','latestStatusTime','inactiveParcelStatus','recoveryTime','recoveredWithinDeadline']; let csv=[keys.join(',')].concat(arr.map(r=>keys.map(k=>'"'+String(r[k]??'').replaceAll('"','""')+'"').join(','))).join('\n'); let a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download=`inactive_${activeCity}_${type}.csv`; a.click();}
 function normalizeRow(r, ctx={}){
   const normKey=x=>String(x||'').replace(/[\u200b\u200c\u200d\ufeff]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
   let get=(names)=>{
