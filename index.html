@@ -268,6 +268,17 @@ function bucket(h, latestStatusTime='', snapshotDate=''){
 function filtered(){return activeCity==='ALL'?rows:rows.filter(r=>r.city===activeCity)}
 function group(arr,key){const m={};arr.forEach(r=>{const k=typeof key==='function'?key(r):r[key];m[k]=(m[k]||0)+1});return m}
 function topAgg(arr,key,limit=10){const m={};arr.forEach(r=>{let k=(typeof key==='function'?key(r):r[key])||'Unknown'; if(k==='')k='Unknown'; if(!m[k])m[k]={key:k,total:0,c195:0,c199:0,c255:0,ood:0,c200:0,c202:0,c211:0,c220:0,c231:0,c232:0,cOther200:0,a3to5:0,a5to7:0,a7plus:0,seven:0,oldest:''}; let o=m[k]; let c=codeNum(r.latestCode); let hrs=parseHours(r.durationHrs); o.total++; if(c===195)o.c195++; if(c===199)o.c199++; if(c===255)o.c255++; if(isPost200ReportCode(c))o.ood++; if(isPost200ReportCode(c) && ![200,202,211,220,231,232].includes(c))o.cOther200++; if(c===200)o.c200++; if(c===202)o.c202++; if(c===211)o.c211++; if(c===220)o.c220++; if(c===231)o.c231++; if(c===232)o.c232++; if(hrs>=72 && hrs<120)o.a3to5++; if(hrs>=120 && hrs<168)o.a5to7++; if(hrs>=168){o.a7plus++; o.seven++;} if(r.latestStatusTime && (!o.oldest || r.latestStatusTime<o.oldest))o.oldest=r.latestStatusTime;}); return Object.values(m).sort((a,b)=>b.total-a.total).slice(0,limit)}
+
+function validDriverKey(r){
+  const candidates=[r.driverAtInactive, r.currentDriver, r.lastScanDriver];
+  for(const v of candidates){
+    const s=String(v??'').trim();
+    if(!s || s==='Unknown') continue;
+    if(s==='-1') continue;
+    return s;
+  }
+  return '';
+}
 function badgeCause(c){let cls=c.includes('200+')||c.includes('200+')?'b-driver':c.includes('195')?'b-sat':c.includes('255')?'b-ex':c.includes('199')?'b-other':'b-other';return `<span class="badge ${cls}">${c}</span>`}
 function barChart(el, data, color='linear-gradient(90deg,var(--orange),var(--orange2),var(--amber))'){let entries=Object.entries(data).sort((a,b)=>b[1]-a[1]);let max=Math.max(1,...entries.map(x=>x[1]));el.innerHTML=entries.map(([k,v])=>`<div class="barrow"><b>${k}</b><div class="barbg"><div class="barfill" style="width:${v/max*100}%;background:${color}"></div></div><span>${fmt(v)}</span></div>`).join('')||'<p class="muted">No data</p>'}
 function stackedAging(el, arr){let order=['3-5 days','5-7 days','7-14 days','14+ days','<3 days'];let colors={'3-5 days':'linear-gradient(90deg,#4ade80,#a3e635)','5-7 days':'linear-gradient(90deg,#ffd166,#ffb703)','7-14 days':'linear-gradient(90deg,#ff9f1c,#ff6a00)','14+ days':'linear-gradient(90deg,#ff4d4d,#ff6a00)','<3 days':'linear-gradient(90deg,#a8a29e,#f5f5f4)'};let m=group(arr,'agingBucket');let total=arr.length||1;el.innerHTML='<div class="pillrow">'+order.map(k=>`<span class="smallpill">${k}: ${fmt(m[k]||0)}</span>`).join('')+'</div>'+order.map(k=>`<div class="barrow"><b>${k}</b><div class="barbg"><div class="barfill" style="width:${(m[k]||0)/total*100}%;background:${colors[k]}"></div></div><span>${fmt(m[k]||0)}</span></div>`).join('')}
@@ -471,7 +482,7 @@ document.getElementById('referenceGrid').style.display = activeCity==='ALL' ? 'g
 barChart(document.getElementById('warehouse195Chart'), group(keyArr.filter(r=>codeNum(r.latestCode)===195),'city'), 'linear-gradient(90deg,#7c3aed,#b884ff)'); barChart(document.getElementById('warehouse200Chart'), group(keyArr.filter(r=>isPost200ReportCode(codeNum(r.latestCode))),'city')); barChart(document.getElementById('warehouseChart'), group(keyArr,'city')); barChart(document.getElementById('causeChart'), group(keyArr,'rootCause'), 'linear-gradient(90deg,#ff6a00,#ff9f1c,#ffd166)'); stackedAging(document.getElementById('agingChart'), keyArr); lineChart(document.getElementById('trend195Chart'), keyArr.filter(r=>codeNum(r.latestCode)===195)); lineChart(document.getElementById('trend200Chart'), keyArr.filter(r=>isPost200ReportCode(codeNum(r.latestCode))));
 let oodArr=keyArr.filter(r=>isPost200ReportCode(codeNum(r.latestCode)));
 let routes=topAgg(oodArr,'route',15); table(document.getElementById('routeTable'),[{label:'Route',key:'key'},{label:'Total 200+',key:'total'},{label:'3-5 Days',key:'a3to5'},{label:'5-7 Days',key:'a5to7'},{label:'7+ Days',key:'a7plus'},{label:'200',key:'c200'},{label:'202',key:'c202'},{label:'211',key:'c211'},{label:'220',key:'c220'},{label:'231',key:'c231'},{label:'232',key:'c232'},{label:'Other 200+',key:'cOther200'},{label:'Oldest Time',key:'oldest'}],routes);
-let drivers=topAgg(oodArr,r=>r.driverAtInactive||r.currentDriver||r.lastScanDriver,15); table(document.getElementById('driverTable'),[{label:'Driver ID',key:'key'},{label:'Total 200+',key:'total'},{label:'3-5 Days',key:'a3to5'},{label:'5-7 Days',key:'a5to7'},{label:'7+ Days',key:'a7plus'},{label:'Oldest Time',key:'oldest'}],drivers);
+let drivers=topAgg(oodArr.filter(r=>validDriverKey(r)), validDriverKey,15); table(document.getElementById('driverTable'),[{label:'Driver ID',key:'key'},{label:'Total 200+',key:'total'},{label:'3-5 Days',key:'a3to5'},{label:'5-7 Days',key:'a5to7'},{label:'7+ Days',key:'a7plus'},{label:'Oldest Time',key:'oldest'}],drivers);
 table(document.getElementById('transit199Table'),[{label:'Inactive WHS',key:'key'},{label:'Count 199',key:'total'},{label:'7+ Days',key:'seven'},{label:'Oldest Time',key:'oldest'}],topAgg(arr.filter(r=>codeNum(r.latestCode)===199),'city',50));
 table(document.getElementById('oodTable'),[{label:'WHS',key:'whs'},{label:'200',key:'c200'},{label:'202',key:'c202'},{label:'211',key:'c211'},{label:'220',key:'c220'},{label:'231',key:'c231'},{label:'232',key:'c232'},{label:'Other 200+',key:'cOther200'},{label:'Total 200+',key:'total'}],statusMatrix(oodArr));
 table(document.getElementById('linehaul195Table'),[{label:'Inact. WHS → Dest. WHS',key:'key'},{label:'195 (<14d)',key:'lt14'},{label:'195 (>14d)',key:'gt14'},{label:'Total',key:'total'},{label:'Oldest Time',key:'oldest'}],linehaulTable(keyArr,195));
@@ -623,7 +634,7 @@ function pdfSummaryFor(city){
   const kpis=[['Total Key Inactive',keyArr.length],['200+',oodArr.length],['195 Linehaul Inac',c195],['7+ Days',seven]];
   if(city==='ALL') kpis.push(['Reference 199',c199],['Reference 255',c255],['Manual Removed',removedManual],['Recovered / Closed',removedRecovered]);
   const routes=topAgg(oodArr,'route',8);
-  const drivers=topAgg(oodArr,r=>r.driverAtInactive||r.currentDriver||r.lastScanDriver,12);
+  const drivers=topAgg(oodArr.filter(r=>validDriverKey(r)), validDriverKey,12);
   const line195=linehaulTable(keyArr,195).slice(0,8);
   const status=statusMatrix(oodArr).slice(0,8);
   return {arr,keyArr,oodArr,kpis,routes,drivers,line195,status};
